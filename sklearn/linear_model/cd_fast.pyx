@@ -874,3 +874,95 @@ def enet_coordinate_descent_multi_task(floating[::1, :] W, floating l1_reg,
                     break
 
     return np.asarray(W), gap, tol, n_iter + 1
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+def enet_coordinate_descent_complex(floating[::1, :] W, floating l1_reg,
+                                    floating l2_reg,
+                                    floating[::1, :] Xr,
+                                    floating[::1, :] Xi,
+                                    floating[::1, :] Y,
+                                    int max_iter, floating tol, object rng,
+                                    bint random=0):
+    """Cython version of the coordinate descent algorithm
+        for Elastic-Net mult-task regression in complex domain
+
+    """
+
+    # fused types version of BLAS functions
+    if floating is float:
+        dtype = np.float32
+        gemv = sgemv
+        dot = sdot
+        copy = scopy
+    else:
+        dtype = np.float64
+        gemv = dgemv
+        dot = ddot
+        copy = dcopy
+
+    # get the data information into easy vars
+    cdef unsigned int n_samples = Xr.shape[0]
+    cdef unsigned int n_features = Xr.shape[1]
+
+    # initial value of the residuals
+    cdef floating[::1] Rr = np.empty(n_samples, dtype=dtype)
+    cdef floating[::1] Ri = np.empty(n_samples, dtype=dtype)
+
+    cdef floating[:] w_ii = np.zeros(2, dtype=dtype)
+    cdef unsigned int ii
+    cdef unsigned int jj
+    cdef unsigned int n_iter = 0
+    cdef unsigned int f_iter
+    cdef UINT32_t rand_r_state_seed = rng.randint(0, RAND_R_MAX)
+    cdef UINT32_t* rand_r_state = &rand_r_state_seed
+
+    cdef floating* W_ptr = &W[0, 0]
+    cdef floating* Y_ptr = &Y[0, 0]
+
+    if l1_reg == 0:
+        warnings.warn("Coordinate descent with l1_reg=0 may lead to unexpected"
+            " results and is discouraged.")
+
+    with nogil:
+        # Compute Rr and Ri: real and imaginary parts of the residual
+        # real part: Yr - np.dot(Xr, Wr) + np.dot(Xi, Wi)
+        copy(n_samples, Y_ptr, 1, &Rr[0], 1)
+        gemv(CblasColMajor, CblasNoTrans,
+             n_samples, n_features, -1.0, &Xr[0, 0], n_samples,
+             W_ptr, 2, 1.0, &Rr[0], 1)
+        gemv(CblasColMajor, CblasNoTrans,
+             n_samples, n_features, 1.0, &Xi[0, 0], n_samples,
+             W_ptr + 1, 2, 1.0, &Rr[0], 1)
+
+        # imaginary part:
+        # real part: Yr - np.dot(Xr, Wi) - np.dot(Xi, Wr)
+        copy(n_samples, Y_ptr + n_samples, 1, &Ri[0], 1)
+        gemv(CblasColMajor, CblasNoTrans,
+             n_samples, n_features, -1.0, &Xr[0, 0], n_samples,
+             W_ptr + 1, 2, 1.0, &Ri[0], 1)
+        gemv(CblasColMajor, CblasNoTrans,
+             n_samples, n_features, -1.0, &Xi[0, 0], n_samples,
+             W_ptr, 2, 1.0, &Ri[0], 1)
+
+        # tol = tol * linalg.norm(Y, ord='fro') ** 2
+        tol = tol * dot(n_samples * 2, Y_ptr, 1, Y_ptr, 1)
+
+        for n_iter in range(max_iter):
+            for f_iter in range(n_features):  # Loop over coordinates
+                # select a coordinate
+                if random:
+                    ii = rand_int(n_features, rand_r_state)
+                else:
+                    ii = f_iter
+
+                # w_ii = W[:, ii] # Store previous value
+                w_ii[0] = W[0, ii]
+                w_ii[1] = W[1, ii]
+
+                # if np.sum(w_ii ** 2) != 0.0:  # can do better
+                if w_ii[0] != 0.0 or w_ii[1] != 0.0:
+                    # Remove contributions of w_ii from R
+
+                # prepare for the soft-thresholding

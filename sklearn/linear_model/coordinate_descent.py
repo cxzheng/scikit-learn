@@ -2260,3 +2260,87 @@ class MultiTaskLassoCV(LinearModelCV, RegressorMixin):
             max_iter=max_iter, tol=tol, copy_X=copy_X,
             cv=cv, verbose=verbose, n_jobs=n_jobs, random_state=random_state,
             selection=selection)
+
+###############################################################################
+# Complex ElasticNet and Lasso models 
+
+class ComplexElasticNet(ElasticNet):
+    """ElasticNet model in complex domain trained with L1/L2 mixed-norm as regularizer
+    """
+
+    def __init__(self, alpha=1.0, l1_ratio=0.5, max_iter=1000, 
+                 tol=1e-4, warm_start=False, random_state=None, 
+                 selection='cyclic'):
+        self.l1_ratio = l1_ratio
+        self.alpha = alpha
+        self.max_iter = max_iter
+        self.tol = tol
+        self.warm_start = warm_start
+        self.random_state = random_state
+        self.selection = selection
+
+    def fit(self, Xr, Xi, Y):
+        """Fit MultiTaskElasticNet model with coordinate descent
+
+        Parameters
+        -----------
+        Xr : ndarray, shape (n_samples, n_features)
+             real part of the X matrix
+        Xi : ndarray, shape (n_samples, n_features)
+             imaginary part of the X matrix
+        Y  : ndarray, shape (n_samples, 2)
+             Target. Will be cast to X's dtype if necessary
+             Y[:,0] is the real part and Y[:,1] is the imaginary part
+        """
+        Xr = check_array(Xr, dtype=[np.float64, np.float32], order='F', copy=False)
+        Xi = check_array(Xi, dtype=[np.float64, np.float32], order='F', copy=False)
+        Y = check_array(Y, dtype=X.dtype.type, order='F', copy=False)
+
+        n_samples, n_features = X.shape
+
+        if n_samples != Y.shape[0]:
+            raise ValueError("X and Y have inconsistent dimensions (%d != %d)"
+                             % (n_samples, y.shape[0]))
+        if Y.shape[1] != 2:
+            raise ValueError("Y should have %d columns, but two are expected (real and imaginary part)"
+                             % y.shape[1])
+
+        if not self.warm_start or self.coef_ is None:
+            self.coef_ = np.zeros((2, n_features), dtype=X.dtype.type, order='F')
+
+        l1_reg = self.alpha * self.l1_ratio * n_samples
+        l2_reg = self.alpha * (1.0 - self.l1_ratio) * n_samples
+
+        self.coef_ = np.asfortranarray(self.coef_)  # coef contiguous in memory
+
+        if self.selection not in ['random', 'cyclic']:
+            raise ValueError("selection should be either random or cyclic.")
+        random = (self.selection == 'random')
+
+        # now call coordinate descient
+        self.coef_, self.dual_gap_, self.eps_, self.n_iter_ = \
+            cd_fast.enet_coordinate_descent_complex(
+                self.coef_, l1_reg, l2_reg, Xr, Xi, Y, self.max_iter, self.tol,
+                check_random_state(self.random_state), random)
+
+        if self.dual_gap_ > self.eps_:
+            warnings.warn('Objective did not converge, you might want'
+                          ' to increase the number of iterations',
+                          ConvergenceWarning)
+
+        # return self for chaining fit and predict calls
+        return self
+
+class ComplexLasso(ComplexElasticNet):
+
+    def __init__(self, alpha=1.0, max_iter=1000, tol=1e-4, 
+                 warm_start=False, random_state=None, selection='cyclic'):
+        self.l1_ratio = 1.0
+        self.alpha = alpha
+        self.max_iter = max_iter
+        self.tol = tol
+        self.warm_start = warm_start
+        self.random_state = random_state
+        self.selection = selection
+
+###############################################################################
