@@ -10,7 +10,7 @@ from libc.math cimport fabs, sqrt
 cimport numpy as np
 import numpy as np
 import numpy.linalg as linalg
-from libc.stdio cimport printf #<-------------------------------------------------------------------------
+#from libc.stdio cimport printf #<-------------------------------------------------------------------------
 
 cimport cython
 from cpython cimport bool

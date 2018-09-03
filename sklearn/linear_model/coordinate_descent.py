@@ -2347,3 +2347,58 @@ class ComplexLasso(ComplexElasticNet):
         self.selection = selection
 
 ###############################################################################
+
+# class ComplexElasticNetCV(ElasticNetCV):
+# 
+#     def __init__(self, l1_ratio=0.5, eps=1e-3, n_alphas=100, alphas=None,
+#                  precompute='auto', max_iter=1000, tol=1e-4, cv='warn', 
+#                  verbose=0, n_jobs=None, random_state=None, selection='cyclic'):
+#         self.l1_ratio = l1_ratio
+#         self.eps = eps
+#         self.n_alphas = n_alphas
+#         self.alphas = alphas
+#         self.precompute = precompute
+#         self.max_iter = max_iter
+#         self.tol = tol
+#         self.cv = cv
+#         self.verbose = verbose
+#         self.n_jobs = n_jobs
+#         self.random_state = random_state
+#         self.selection = selection
+# 
+#     def fit(self, Xr, Xi, Y):
+#         """Fit MultiTaskElasticNet model with coordinate descent
+# 
+#         Parameters
+#         -----------
+#         Xr : ndarray, shape (n_samples, n_features)
+#              real part of the X matrix
+#         Xi : ndarray, shape (n_samples, n_features)
+#              imaginary part of the X matrix
+#         Y  : ndarray, shape (n_samples, 2)
+#              Target. Will be cast to X's dtype if necessary
+#              Y[:,0] is the real part and Y[:,1] is the imaginary part
+#         """
+#         Xr = check_array(Xr, dtype=[np.float64, np.float32], order='F', copy=False)
+#         Xi = check_array(Xi, dtype=[np.float64, np.float32], order='F', copy=False)
+#         Y = check_array(Y, dtype=Xr.dtype.type, order='F', copy=False)
+# 
+#         n_samples, n_features = Xr.shape
+# 
+#         if n_samples != Y.shape[0]:
+#             raise ValueError("X and Y have inconsistent dimensions (%d != %d)"
+#                              % (n_samples, y.shape[0]))
+#         if n_samples != Xi.shape[0] or n_features != Xi.shape[1]:
+#             raise ValueError("Xr and Xi have inconsistent dimensions (%d != %d) or (%d != %d)"
+#                              % (n_samples, Xi.shape[0], n_features, Xi.shape[1]))
+#         if Y.shape[1] != 2:
+#             raise ValueError("Y should have %d columns, but two are expected (real and imaginary part)"
+#                              % y.shape[1])
+# 
+#         if isinstance(self, ComplexElasticNetCV):
+#             model = ComplexElasticNet()
+#         elif instance(self, ComplexLassoCV):
+#             model = ComplexLasso()
+#         else:
+#             raise TypeError("Only ComplexElasticNetCV or ComplexLassoCV is expected")
+
