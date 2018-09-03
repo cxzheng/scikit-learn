@@ -6,7 +6,7 @@
 #
 # License: BSD 3 clause
 
-from libc.math cimport fabs
+from libc.math cimport fabs, sqrt
 cimport numpy as np
 import numpy as np
 import numpy.linalg as linalg
@@ -896,21 +896,43 @@ def enet_coordinate_descent_complex(floating[::1, :] W, floating l1_reg,
         gemv = sgemv
         dot = sdot
         copy = scopy
+        axpy = saxpy
+        scal = sscal
     else:
         dtype = np.float64
         gemv = dgemv
         dot = ddot
         copy = dcopy
+        axpy = daxpy
+        scal = dscal
 
     # get the data information into easy vars
     cdef unsigned int n_samples = Xr.shape[0]
     cdef unsigned int n_features = Xr.shape[1]
+    cdef floating l1_reg_sqr = l1_reg * l1_reg
+
+    # to store XtA
+    cdef floating[::1, :] XtA = np.zeros((n_features, 2), dtype=dtype)
+    cdef floating XtA_axis1norm
+    cdef floating dual_norm_XtA
+    cdef floating R_norm2
+    cdef floating w_norm2
+    cdef floating const
+    cdef floating A_norm2
+    cdef floating l21_norm
 
     # initial value of the residuals
-    cdef floating[::1] Rr = np.empty(n_samples, dtype=dtype)
-    cdef floating[::1] Ri = np.empty(n_samples, dtype=dtype)
+    cdef floating[::1, :] R = np.empty((n_samples, 2), dtype=dtype)
+    cdef floating[::1, :] T = np.empty((n_samples*2, n_features*2), dtype=dtype)
 
+    cdef floating[:] norm_cols_X = np.zeros(n_features, dtype=dtype)
+    cdef floating[::1] tmp = np.zeros(2, dtype=dtype)
     cdef floating[:] w_ii = np.zeros(2, dtype=dtype)
+    cdef floating w_max
+    cdef floating d_w_max
+    cdef floating d_w_ii
+    cdef floating nn
+    cdef floating W_ii_abs_max
     cdef unsigned int ii
     cdef unsigned int jj
     cdef unsigned int n_iter = 0
@@ -918,44 +940,68 @@ def enet_coordinate_descent_complex(floating[::1, :] W, floating l1_reg,
     cdef UINT32_t rand_r_state_seed = rng.randint(0, RAND_R_MAX)
     cdef UINT32_t* rand_r_state = &rand_r_state_seed
 
+    cdef floating* Xr_ptr = &Xr[0, 0]
+    cdef floating* Xi_ptr = &Xi[0, 0]
     cdef floating* W_ptr = &W[0, 0]
     cdef floating* Y_ptr = &Y[0, 0]
+    cdef floating* R_ptr = &R[0, 0]
 
     if l1_reg == 0:
         warnings.warn("Coordinate descent with l1_reg=0 may lead to unexpected"
             " results and is discouraged.")
 
     with nogil:
+        # assemble T matrix, and
+        # norm_cols_X = (np.asarray(X) ** 2).sum(axis=0)
+        for ii in range(n_features):
+            copy(n_samples, Xr_ptr + ii*n_samples, 1, &T[0, ii], 1)
+            copy(n_samples, Xr_ptr + ii*n_samples, 1, &T[n_samples, n_features+ii], 1)
+            copy(n_samples, Xi_ptr + ii*n_samples, 1, &T[n_samples, ii], 1)
+            copy(n_samples, Xi_ptr + ii*n_samples, 1, &T[0, n_features+ii], 1)
+            scal(n_samples, -1.0, &T[0, n_features+ii], 1)
+
+            norm_cols_X[ii] = dot(n_samples*2, &T[0, ii], 1, &T[0, ii], 1)
+            # norm_cols_X[ii] = dot(n_samples, Xr_ptr + ii*n_samples, 1, 
+            #                       Xr_ptr + ii*n_samples, 1) + \
+            #                   dot(n_samples, Xi_ptr + ii*n_samples, 1,
+            #                       Xi_ptr + ii*n_samples, 1)
+
         # Compute Rr and Ri: real and imaginary parts of the residual
+        copy(n_samples*2, Y_ptr, 1, R_ptr, 1)
+
         # real part: Yr - np.dot(Xr, Wr) + np.dot(Xi, Wi)
-        copy(n_samples, Y_ptr, 1, &Rr[0], 1)
         gemv(CblasColMajor, CblasNoTrans,
              n_samples, n_features, -1.0, &Xr[0, 0], n_samples,
-             W_ptr, 2, 1.0, &Rr[0], 1)
+             W_ptr, 2, 1.0, R_ptr, 1)
         gemv(CblasColMajor, CblasNoTrans,
              n_samples, n_features, 1.0, &Xi[0, 0], n_samples,
-             W_ptr + 1, 2, 1.0, &Rr[0], 1)
+             W_ptr + 1, 2, 1.0, R_ptr, 1)
 
-        # imaginary part:
-        # real part: Yr - np.dot(Xr, Wi) - np.dot(Xi, Wr)
-        copy(n_samples, Y_ptr + n_samples, 1, &Ri[0], 1)
+        # imaginary part: Yr - np.dot(Xr, Wi) - np.dot(Xi, Wr)
         gemv(CblasColMajor, CblasNoTrans,
              n_samples, n_features, -1.0, &Xr[0, 0], n_samples,
-             W_ptr + 1, 2, 1.0, &Ri[0], 1)
+             W_ptr + 1, 2, 1.0, R_ptr + n_samples, 1)
         gemv(CblasColMajor, CblasNoTrans,
              n_samples, n_features, -1.0, &Xi[0, 0], n_samples,
-             W_ptr, 2, 1.0, &Ri[0], 1)
+             W_ptr, 2, 1.0, R_ptr + n_samples, 1)
 
         # tol = tol * linalg.norm(Y, ord='fro') ** 2
         tol = tol * dot(n_samples * 2, Y_ptr, 1, Y_ptr, 1)
 
         for n_iter in range(max_iter):
+
+            w_max = 0.0
+            d_w_max = 0.0
+
             for f_iter in range(n_features):  # Loop over coordinates
                 # select a coordinate
                 if random:
                     ii = rand_int(n_features, rand_r_state)
                 else:
                     ii = f_iter
+
+                if norm_cols_X[ii] == 0.0:
+                    continue
 
                 # w_ii = W[:, ii] # Store previous value
                 w_ii[0] = W[0, ii]
@@ -964,5 +1010,113 @@ def enet_coordinate_descent_complex(floating[::1, :] W, floating l1_reg,
                 # if np.sum(w_ii ** 2) != 0.0:  # can do better
                 if w_ii[0] != 0.0 or w_ii[1] != 0.0:
                     # Remove contributions of w_ii from R
+                    # Rr += w_ii_r*Xr[:,ii] - w_ii_i*Xi[:,ii]
+                    # Ri += w_ii_r*Xi[:,ii] + w_ii_i*Xr[:,ii]
+                    # we do it in a larger matrix form using T
+                    # R += [ Xr -Xi ] [ w_r ]
+                    #      [ Xi  Xr ] [ w_i ]
+                    gemv(CblasColMajor, CblasNoTrans, n_samples*2, 2, 1.0,
+                         &T[0, ii], n_samples*2*n_features, &w_ii[0], 1, 
+                         1.0, R_ptr, 1)
+                    # axpy(n_samples, w_ii[0], Xr_ptr + ii*n_samples, 1,
+                    #      &Rr[0], 1)
+                    # axpy(n_samples, -w_ii[1], Xi_ptr + ii*n_samples, 1, 
+                    #      &Rr[0], 1)
+                    # axpy(n_samples, w_ii[0], Xi_ptr + ii*n_samples, 1, 
+                    #      &Ri[0], 1)
+                    # axpy(n_samples, w_ii[1], Xr_ptr + ii*n_samples, 1, 
+                    #      &Ri[0], 1)
 
                 # prepare for the soft-thresholding
+                # - compute the negation of linear term and store in tmp
+                gemv(CblasColMajor, CblasTrans, n_samples*2, 2, 1.0,
+                     &T[0, ii], n_samples*2*n_features, R_ptr, 1, 
+                     0., &tmp[0], 1)
+                # tmp[0] = dot(n_samples, Xr_ptr + ii*n_samples, 1,
+                #              &Rr[0], 1) + \
+                #          dot(n_samples, Xi_ptr + ii*n_samples, 1,
+                #              &Ri[0], 1)
+                # tmp[1] = dot(n_samples, Xr_ptr + ii*n_samples, 1, 
+                #              &Ri[0], 1) - \
+                #          dot(n_samples, Xi_ptr + ii*n_samples, 1,
+                #              &Rr[0], 1)
+
+                # soft-thresholding
+                nn = tmp[0]*tmp[0] + tmp[1]*tmp[1]
+                if nn > l1_reg_sqr:
+                    nn = sqrt(nn)
+                    copy(2, &tmp[0], 1, W_ptr + ii*2, 1)
+                    scal(2, (1. - l1_reg / nn) / (norm_cols_X[ii] + l2_reg),
+                         W_ptr + ii*2, 1)
+
+                    # W is not zero, need to update residual
+                    # Rr -= w_ii_r*Xr[:,ii] - w_ii_i*Xi[:,ii]
+                    # Ri -= w_ii_r*Xi[:,ii] + w_ii_i*Xr[:,ii]
+                    gemv(CblasColMajor, CblasNoTrans, n_samples*2, 2, -1.0,
+                         &T[0, ii], n_samples*2*n_features, W_ptr + ii*2, 1, 
+                         1.0, R_ptr, 1)
+                else:
+                    W[0, ii] = 0.0
+                    W[1, ii] = 0.0
+
+                # update the maximum absolute coefficient update
+                d_w_ii = sqrt((W[0, ii]-w_ii[0])**2 + (W[1, ii]-w_ii[1])**2)
+
+                if d_w_ii > d_w_max:
+                    d_w_max = d_w_ii
+
+                W_ii_abs_max = sqrt(W[0, ii]**2 + W[1, ii]**2)
+                if W_ii_abs_max > w_max:
+                    w_max = W_ii_abs_max
+                    
+            # Now check for convergence
+            if w_max == 0.0 or d_w_max / w_max < d_w_tol or n_iter == max_iter - 1:
+                # the biggest coordinate update of this iteration was smaller than
+                # the tolerance: check the duality gap as ultimate stopping
+                # criterion
+
+                # XtA = T^T * R - l2_reg * W
+                gemv(CblasColMajor, CblasTrans, n_samples*2, n_features*2, 1.0,
+                     &T[0, 0], n_samples*2, R_ptr, 1, 0., &XtA[0, 0], 1)
+                if l2_reg > 0.:
+                    for ii in range(n_features):
+                        XtA[ii, 0] -= l2_reg * W[0, ii]
+                        XtA[ii, 1] -= l2_reg * W[1, ii]
+
+                # dual_norm_XtA = np.max(np.sqrt(np.sum(XtA ** 2, axis=1)))
+                dual_norm_XtA = 0.0
+                for ii in range(n_features):
+                    XtA_axis1norm = sqrt(XtA[ii, 0]**2 + XtA[ii, 1]**2)
+                    if XtA_axis1norm > dual_norm_XtA:
+                        dual_norm_XtA = XtA_axis1norm
+
+                # R_norm = linalg.norm(R, ord='fro')
+                R_norm2 = dot(n_samples*2, R_ptr, 1, R_ptr, 1)
+
+                if dual_norm_XtA > l1_reg:
+                    const =  l1_reg / dual_norm_XtA
+                    A_norm2 = R_norm2 * (const ** 2)
+                    gap = 0.5 * (R_norm2 + A_norm2)
+                else:
+                    const = 1.0
+                    gap = R_norm2
+
+                # l21_norm = np.sqrt(np.sum(W ** 2, axis=0)).sum()
+                l21_norm = 0.0
+                for ii in range(n_features):
+                    l21_norm += sqrt(W[0, ii]**2 + W[1, ii]**2)
+
+                gap += l1_reg * l21_norm - \
+                       const * dot(n_samples*2, R_ptr, 1, Y_ptr, 1)
+                
+                if l2_reg > 0.:
+                    # w_norm = linalg.norm(W, ord='fro')
+                    w_norm2 = dot(n_features*2, W_ptr, 1, W_ptr, 1)
+
+                    gap += 0.5 * l2_reg * (1 + const ** 2) * w_norm2
+
+                if gap < tol:
+                    # return if we reached desired tolerance
+                    break
+
+    return np.asarray(W), gap, tol, n_iter + 1
