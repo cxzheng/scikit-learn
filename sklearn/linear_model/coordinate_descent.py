@@ -2294,19 +2294,22 @@ class ComplexElasticNet(ElasticNet):
         """
         Xr = check_array(Xr, dtype=[np.float64, np.float32], order='F', copy=False)
         Xi = check_array(Xi, dtype=[np.float64, np.float32], order='F', copy=False)
-        Y = check_array(Y, dtype=X.dtype.type, order='F', copy=False)
+        Y = check_array(Y, dtype=Xr.dtype.type, order='F', copy=False)
 
-        n_samples, n_features = X.shape
+        n_samples, n_features = Xr.shape
 
         if n_samples != Y.shape[0]:
             raise ValueError("X and Y have inconsistent dimensions (%d != %d)"
                              % (n_samples, y.shape[0]))
+        if n_samples != Xi.shape[0] or n_features != Xi.shape[1]:
+            raise ValueError("Xr and Xi have inconsistent dimensions (%d != %d) or (%d != %d)"
+                             % (n_samples, Xi.shape[0], n_features, Xi.shape[1]))
         if Y.shape[1] != 2:
             raise ValueError("Y should have %d columns, but two are expected (real and imaginary part)"
                              % y.shape[1])
 
         if not self.warm_start or self.coef_ is None:
-            self.coef_ = np.zeros((2, n_features), dtype=X.dtype.type, order='F')
+            self.coef_ = np.zeros((n_features, 2), dtype=Xr.dtype.type, order='F')
 
         l1_reg = self.alpha * self.l1_ratio * n_samples
         l2_reg = self.alpha * (1.0 - self.l1_ratio) * n_samples
