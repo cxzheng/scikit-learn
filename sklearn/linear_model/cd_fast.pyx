@@ -252,11 +252,9 @@ def enet_coordinate_descent(floating[::1] w,
 
                 # update the maximum absolute coefficient update
                 d_w_ii = fabs(w[ii] - w_ii)
-                if d_w_ii > d_w_max:
-                    d_w_max = d_w_ii
+                d_w_max = fmax(d_w_max, d_w_ii)
 
-                if fabs(w[ii]) > w_max:
-                    w_max = fabs(w[ii])
+                w_max = fmax(w_max, fabs(w[ii]))
 
             if (w_max == 0.0 or
                 d_w_max / w_max < d_w_tol or
@@ -1034,13 +1032,10 @@ def enet_coordinate_descent_complex(floating[::1, :] W, floating l1_reg,
 
                 # update the maximum absolute coefficient update
                 d_w_ii = sqrt((W[ii, 0]-w_ii[0])**2 + (W[ii, 1]-w_ii[1])**2)
-
-                if d_w_ii > d_w_max:
-                    d_w_max = d_w_ii
+                d_w_max = fmax(d_w_max, d_w_ii)
 
                 W_ii_abs_max = sqrt(W[ii, 0]**2 + W[ii, 1]**2)
-                if W_ii_abs_max > w_max:
-                    w_max = W_ii_abs_max
+                w_max = fmax(w_max, W_ii_abs_max)
                     
             # Now check for convergence
             if w_max == 0.0 or d_w_max / w_max < d_w_tol or n_iter == max_iter - 1:
