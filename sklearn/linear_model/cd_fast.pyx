@@ -10,7 +10,7 @@ from libc.math cimport fabs, sqrt
 cimport numpy as np
 import numpy as np
 import numpy.linalg as linalg
-#from libc.stdio cimport printf #<-------------------------------------------------------------------------
+from libc.stdio cimport printf #<-------------------------------------------------------------------------
 
 cimport cython
 from cpython cimport bool
@@ -1085,5 +1085,8 @@ def enet_coordinate_descent_complex(floating[::1, :] W, floating l1_reg,
                 if gap < tol:
                     # return if we reached desired tolerance
                     break
+
+        for ii in range(n_samples):
+            printf("R %f %f\n", R[ii,0], R[ii,1])
 
     return np.asarray(W), gap, tol, n_iter + 1
