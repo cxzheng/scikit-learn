@@ -1086,7 +1086,4 @@ def enet_coordinate_descent_complex(floating[::1, :] W, floating l1_reg,
                     # return if we reached desired tolerance
                     break
 
-        for ii in range(n_samples):
-            printf("R %f %f\n", R[ii,0], R[ii,1])
-
     return np.asarray(W), gap, tol, n_iter + 1
