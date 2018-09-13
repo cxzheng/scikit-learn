@@ -17,7 +17,7 @@ from .least_angle import (Lars, LassoLars, lars_path, LarsCV, LassoLarsCV,
 from .coordinate_descent import (Lasso, ElasticNet, LassoCV, ElasticNetCV,
                                  lasso_path, enet_path, MultiTaskLasso,
                                  MultiTaskElasticNet, MultiTaskElasticNetCV,
-                                 MultiTaskLassoCV)
+                                 MultiTaskLassoCV, ComplexElasticNet, ComplexLasso)
 from .huber import HuberRegressor
 from .sgd_fast import Hinge, Log, ModifiedHuber, SquaredLoss, Huber
 from .stochastic_gradient import SGDClassifier, SGDRegressor
@@ -60,6 +60,8 @@ __all__ = ['ARDRegression',
            'MultiTaskElasticNetCV',
            'MultiTaskLasso',
            'MultiTaskLassoCV',
+           'ComplexElasticNet',
+           'ComplexLasso',
            'OrthogonalMatchingPursuit',
            'OrthogonalMatchingPursuitCV',
            'PassiveAggressiveClassifier',
